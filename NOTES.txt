@@ -1,0 +1,218 @@
+Generate statistics for each AWS volume attached to an EC2 instance. 
+
+EC2 ID [[#Listing EC2 Volume information]]
+EC2 Name [[#Listing EC2 Information]]
+Volume ID [[#Listing EC2 Volume information]]
+Volume Name [[#Listing EC2 Volume information]]
+Volume Size [[#Listing EC2 Volume information]]
+Partition/Device Name (lsblk -f)
+Partition File System (lsblk -f)
+Partition Mount Point (lsblk -f)
+Partition Size (df -h)
+Partition Free (df -h)
+Partition % (df -h)
+Snapshot Count [[#Listing Snapshot Information Per Volume]]
+Snapshot Size (Total) [[#Listing Snapshot Information Per Volume]]
+
+
+# Problems with volume to device/partition mapping
+Cannot automatically map volume to partition, especially for NVME. Sometimes ambiguous. Script will only handle `/dev/xvd[A-Z]`. Volumes should be mounted in same order (using device name) as each device in the OS. 
+
+NVME is different, see below.
+
+# Converting between NVME AWS EBS Volume ID and Partition
+[](https://stackoverflow.com/posts/62225846/timeline)
+
+This has been driving me nuts with Nitro-based instances, where the device names on the instance may not be ordered in the same sequence as shown in the AWS console. Luckily, per the [AWS documentation](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/nvme-ebs-volumes.html#identify-nvme-ebs-device), the serial number of the device on the instance is set to the EBS volume ID. So just run
+
+`lsblk -o +SERIAL`
+
+and it will give you the volume ID as shown in the console.
+https://stackoverflow.com/a/62225846
+
+```
+NAME         MAJ:MIN RM   SIZE RO TYPE MOUNTPOINTS                 SERIAL
+nvme0n1      259:0    0   300G  0 disk                      vol0cf87b461dd7d0f1f
+├─nvme0n1p1  259:1    0 299.9G  0 part /                           
+```
+
+# Listing EC2 Volume information 
+
+```
+aws ec2 describe-volumes --profile=umwelt-ho
+{
+    "Volumes": [
+        {
+            "Attachments": [
+                {
+                    "AttachTime": "2018-05-14T12:30:15.000Z",
+                    "Device": "/dev/sda1",
+                    "InstanceId": "i-08dde292db960c603",
+                    "State": "attached",
+                    "VolumeId": "vol-01acddde213a769b0",
+                    "DeleteOnTermination": true
+                }
+            ],
+            "AvailabilityZone": "ap-southeast-2b",
+            "CreateTime": "2018-05-14T12:30:15.459Z",
+            "Encrypted": false,
+            "Size": 500,
+		}
+	]
+}
+
+aws ec2 describe-volumes --profile=umwelt-ho | jq '.Volumes[] | .Attachments | .[] | .InstanceId'
+aws ec2 describe-volumes --profile=umwelt-ho | jq '.Volumes[] | .Attachments | .[] | .VolumeId'
+aws ec2 describe-volumes --profile=umwelt-ho | jq '.Volumes[] | .Attachments | .[] | .Device'
+aws ec2 describe-volumes --profile=umwelt-ho | jq '.Volumes[] | .Size'
+
+```
+
+Volume information per instance 
+```
+ jq '.Volumes[] | select(.Attachments[].InstanceId == "i-0b9bd41b62a74dee8")' volumes.json
+```
+
+# Listing Snapshot Information Per Volume
+
+```
+aws ec2 describe-snapshots --profile=umwelt-ho | jq '.Snapshots[] | select(.OwnerId == "131842051179" and .VolumeId == "vol-01acddde213a769b0")'
+{
+  "Description": "Created by CreateImage(i-08dde292db960c603) for ami-01c90a4dd8a7010ad from vol-01acddde213a769b0",
+  "Encrypted": false,
+  "OwnerId": "131842051179",
+  "Progress": "100%",
+  "SnapshotId": "snap-03a8cd40880bdef33",
+  "StartTime": "2018-06-20T06:38:57.000Z",
+  "State": "completed",
+  "VolumeId": "vol-01acddde213a769b0",
+  "VolumeSize": 30,
+  "StorageTier": "standard"
+}
+{
+...
+}
+```
+
+# Listing EC2 Information
+```
+aws ec2 describe-instances --profile=umwelt-ho | head -n 50
+{
+    "Reservations": [
+        {
+            "Groups": [],
+            "Instances": [
+                {
+                    "AmiLaunchIndex": 0,
+                    "ImageId": "ami-334f9951",
+                    "InstanceId": "i-08dde292db960c603",
+                    "InstanceType": "t2.2xlarge",
+                    "KeyName": "umwelt",
+                    "LaunchTime": "2022-07-28T23:50:28.000Z",
+                    "Monitoring": {
+                        "State": "disabled"
+                    },
+                    "Placement": {
+                        "AvailabilityZone": "ap-southeast-2b",
+                        "GroupName": "",
+					"Tags": [
+					  {
+						"Key": "Name",
+						"Value": "MPO"
+					  },
+					  {
+						"Key": "EC2_Name",
+						"Value": "processor-20190114 (main)"
+					  }
+					],
+```
+
+```
+aws ec2 describe-instances --profile=umwelt-ho | jq '.Reservations[].Instances[].Tags[] | select(.Key == "Name") | .Value'
+"MPO"
+"Glencore"
+"ravensworth"
+aws ec2 describe-instances --profile=umwelt-ho | jq '.Reservations[].Instances[].InstanceId'
+"i-08dde292db960c603"
+"i-09629fcbdc6bbd111"
+"i-0b9bd41b62a74dee8"
+```
+
+# Listing Partition Information
+
+SERIAL column is only populated for NVME drives `/dev/nvme[0-26]n1`. Example `vol0cf87b461dd7d0f1f`
+
+```
+lsblk -f -o +SERIAL -l | grep -v squashfs
+NAME  FSTYPE   LABEL           UUID                                 MOUNTPOINT                  SERIAL
+xvda
+xvda1 ext4     cloudimg-rootfs bbf64c6d-bc15-4ae0-aa4c-608fd9820d95 /
+xvdb  ext4     opt             9318d9b1-1dbc-4efd-a33f-182ad79f0256 /opt
+xvdc  ext4     mnt             a9f38c1c-0131-4a9b-bf21-274f0130d5d8 /mnt
+xvdf  ext4     zip-archive     4310572f-2f7f-415f-9e66-d44abd0600da /zip-archive
+```
+
+Filter out single block `xvda` line
+Extract block device name, convert to AWS Volume Name
+Extract Mount Point
+Extract Serial Number
+
+**Print block device names**
+```
+lsblk -l -f -o NAME,FSTYPE,MOUNTPOINT,SERIAL | grep -v squashfs
+NAME  FSTYPE   MOUNTPOINT                  SERIAL
+xvda                                       
+xvda1 ext4     /                           
+xvdb  ext4     /opt                        
+xvdc  ext4     /mnt                        
+xvdf  ext4     /zip-archive                
+```
+
+```
+lsblk -l -f -o NAME,FSTYPE,MOUNTPOINT,SERIAL | grep -v squashfs
+NAME       FSTYPE   MOUNTPOINT                  SERIAL
+loop0               /snap/amazon-ssm-agent/9565 
+loop1               /snap/amazon-ssm-agent/9881 
+loop2               /snap/core18/2829           
+loop3               /snap/core18/2846           
+loop4               /snap/core20/2379           
+loop5               /snap/core20/2434           
+loop6               /snap/core22/1663           
+loop7               /snap/core22/1722           
+nvme0n1                                         vol0cf87b461dd7d0f1f
+nvme0n1p1  ext4     /                           
+nvme0n1p14                                      
+nvme0n1p15 vfat     /boot/efi                   
+```
+
+Convert /xvda block device name to EBS Volume Name
+```
+lsblk -l -f -o NAME,FSTYPE,MOUNTPOINT,SERIAL | grep -v squashfs | awk '{print $1}' | sed 's/xvd/\/dev\/sd/'
+NAME
+/dev/sda
+/dev/sda1
+/dev/sdb
+/dev/sdc
+/dev/sdf
+```
+
+# List Partition Usage Information
+
+```
+df | grep /dev/xvda1 | awk '{print $2,$3,$4,$5,$6}'
+Filesystem     1K-blocks      Used Available Use% Mounted on
+/dev/xvda1     101569200  14407100  87145716  15% /
+```
+
+
+# R&D complete, investigate putting things together
+
+1. Run `aws ec2 describe-instances`, `describe-snapshots`, `describe-volumes` to generate 3 JSON files for each AWS environment
+2. For each EC2 VM
+	1. Run custom `lsblk` command on each EC2 instance
+	2. Run custom `df` command on each EC2 instance
+	3. Convert block device names and link to EBS volume
+	4. Fail if any block devices not linked or EBS volume not linked
+	5. Create CSV with columns defined at top of file
+
+
