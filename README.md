@@ -10,9 +10,9 @@
 See `example_output/ebs.csv` to view the current application output. 
 
 # Bugfixes & Improvements
-[ ] nvme drives in the OS_VOLUME_NAME column do not contain their `/dev/` prefix 
-[ ] support more than default region, iterate all regions
-[x] support prompting to paste in lsblk.txt and df.txt
-[ ] filter out windows VMs, test base AMI?
-[x] handle NVME drives and random ordering
+[ ] nvme drives in the OS_VOLUME_NAME column do not contain their `/dev/` prefix   
+[ ] support more than default region, iterate all regions  
+[x] support prompting to paste in lsblk.txt and df.txt  
+[ ] filter out windows VMs, test base AMI?   
+[x] handle NVME drives and random ordering   
 
